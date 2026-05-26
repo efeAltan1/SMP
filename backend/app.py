@@ -5,6 +5,8 @@ from routes.subjects import bp as subjects_bp
 from routes.grades import bp as grades_bp
 from routes.attendances import bp as attendance_bp
 from routes.announcements import bp as announcements_bp
+from routes.analytics import bp as analytics_bp
+
 
 
 
@@ -19,6 +21,7 @@ def create_app():
     app.register_blueprint(grades_bp, url_prefix='/api/grades')
     app.register_blueprint(attendance_bp, url_prefix='/api/attendance') 
     app.register_blueprint(announcements_bp, url_prefix='/api/announcements')
+    app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
      
     return app
 
