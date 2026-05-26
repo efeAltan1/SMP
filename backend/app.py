@@ -4,6 +4,7 @@ from config import FRONTEND_URL
 from routes.subjects import bp as subjects_bp
 from routes.grades import bp as grades_bp
 from routes.attendances import bp as attendance_bp
+from routes.announcements import bp as announcements_bp
 
 
 
@@ -17,6 +18,7 @@ def create_app():
     app.register_blueprint(subjects_bp, url_prefix='/api/subjects')
     app.register_blueprint(grades_bp, url_prefix='/api/grades')
     app.register_blueprint(attendance_bp, url_prefix='/api/attendance') 
+    app.register_blueprint(announcements_bp, url_prefix='/api/announcements')
      
     return app
 
