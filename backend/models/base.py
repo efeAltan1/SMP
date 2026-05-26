@@ -2,35 +2,31 @@ from config import db
 from bson import ObjectId
 
 
-# parent class for all models. collections inherit from this.
+# Parent class for all models. Subclasses inherit from this and implement their own validate() method to check required fields. 
 class BaseModel:
 
-    # stores the raw document dict passed in from MongoDB or a route
+    # Stores raw data. Subclasses inherit this and their own methods to validate and save to MongoDB.
     def __init__(self, data):
         self.data = data
 
-    # overridden by subclasses to check required fields before saving
+    # Empty class that subclasses override to validate required fields.
     def validate(self):
         pass
 
-    # returns a JSON-safe copy of the document. converts ObjectId to string
+    # Returns a JSON copy of the data.
     def to_dict(self):
         data_copy = self.data.copy()
         if '_id' in data_copy:
             data_copy['_id'] = str(data_copy['_id'])
         return data_copy
 
-    # upserts the document into MongoDB. updates if exists, inserts if not
+    # Upserts the document in MongoDB. If it exists, update. If it doesn't, insert.
     def save(self):
         self.validate()
         collection = db[self.collection]
-        collection.replace_one(
-            {"_id": self.data.get("_id")},
-            self.data,
-            upsert=True
-        )
+        collection.replace_one({"_id": self.data.get("_id")}, self.data, upsert=True)
 
-    # fetches a single document by its ID. subclass defines which collection to look in
+    # Fetches single document in the collection by ID. 
     @classmethod
     def find_by_id(cls, id):
         collection = db[cls.collection]
@@ -39,7 +35,7 @@ class BaseModel:
             return cls(doc)
         return None
 
-    # fetches all documents in the collection and returns them as model instances
+    # Fetches all documents in the collection.
     @classmethod
     def find_all(cls):
         collection = db[cls.collection]
