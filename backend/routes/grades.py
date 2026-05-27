@@ -1,88 +1,68 @@
-from flask import Blueprint, request, jsonify, make_response
+from flask import Blueprint, jsonify, make_response
 from models.grade import Grade
-import numpy as np
 import csv
 import io
 
 
 bp = Blueprint('grades', __name__)
 
-# Accessing the GPA of the student. GPA calculation is based on scores, and the weights. The weighted average is calculated and then converted to a GPA scale.
+
+# Turkish letter grade to GPA point mapping
+LETTER_TO_GPA = {
+    'AA': 4.0, 'BA': 3.5, 'BB': 3.0, 'CB': 2.5,
+    'CC': 2.0, 'DC': 1.5, 'DD': 1.0, 'FF': 0.0,
+    'DZ': 0.0, 'G': 4.0
+}
+
+
+# Calculates GPA from letter grades and credits. Only includes courses with a final letter grade.
 @bp.route('/gpa', methods=['GET'])
 def get_gpa():
     grades = Grade.find_all()
-    if not grades:
+    graded = [g for g in grades if g.data.get('letter_grade') in LETTER_TO_GPA]
+    if not graded:
         return jsonify({"status": "ok", "data": {"gpa": 0.0}})
 
-    scores = np.array([g.data['score'] for g in grades])
-    weights = np.array([g.data['weight'] for g in grades])
+    total_points = 0.0
+    total_credits = 0.0
 
-    weighted_avg = np.average(scores, weights=weights)
+    for g in graded:
+        points = LETTER_TO_GPA[g.data['letter_grade']]
+        try:
+            credits = float(g.data.get('credits', 0))
+        except (ValueError, TypeError):
+            credits = 0.0
+        total_points += points * credits
+        total_credits += credits
 
-
-# GPA scale based on weighted average grades of the student. Thresholds are adjusted to reflect the commonly used grading system.
-    if weighted_avg >= 97:
-        gpa = 4.0
-    elif weighted_avg >= 93:
-        gpa = 3.8
-    elif weighted_avg >= 90:
-        gpa = 3.6
-    elif weighted_avg >= 87:
-        gpa = 3.4
-    elif weighted_avg >= 83:
-        gpa = 3.2
-    elif weighted_avg >= 80:
-        gpa = 2.9
-    elif weighted_avg >= 77:
-        gpa = 2.6
-    elif weighted_avg >= 73:
-        gpa = 2.3
-    elif weighted_avg >= 70:
-        gpa = 1.7
-    elif weighted_avg >= 67:
-        gpa = 1.3
-    elif weighted_avg >= 63:
-        gpa = 1.0
-    elif weighted_avg >= 60:
-        gpa = 0.7
-    else:
-        gpa = 0.0
-
-    return jsonify({"status": "ok", "data": {"gpa": gpa, "average": round(float(weighted_avg), 2)}})
+    gpa = round(total_points / total_credits, 2) if total_credits > 0 else 0.0
+    return jsonify({"status": "ok", "data": {"gpa": gpa}})
 
 
-
-# Export all grades as a CSV file. CSV columns are id, subject_id, title, score, weight. The file "grades.csv" is downloaded when the route is accessed.
+# Export all grades as CSV
 @bp.route('/export', methods=['GET'])
 def export_grades():
     grades = Grade.find_all()
-
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['id', 'subject_id', 'title', 'score', 'weight'])
-
+    writer.writerow(['code', 'subject', 'semester', 'midterm', 'final', 'letter_grade', 'credits', 'ects'])
     for g in grades:
         d = g.to_dict()
-        writer.writerow([d.get('_id'), d.get('subject_id'), d.get('title'), d.get('score'), d.get('weight')])
-
+        writer.writerow([
+            d.get('code'), d.get('subject'), d.get('semester'),
+            d.get('midterm'), d.get('final'), d.get('letter_grade'),
+            d.get('credits'), d.get('ects')
+        ])
     response = make_response(output.getvalue())
     response.headers['Content-Disposition'] = 'attachment; filename=grades.csv'
     response.headers['Content-Type'] = 'text/csv'
     return response
 
-# CRUD routes for grades. 
+
 @bp.route('/', methods=['GET'])
 def get_grades():
     grades = Grade.find_all()
     return jsonify({"status": "ok", "data": [g.to_dict() for g in grades]})
-
-
-@bp.route('/', methods=['POST'])
-def create_grade():
-    data = request.get_json()
-    grade = Grade(data)
-    grade.save()
-    return jsonify({"status": "ok", "data": grade.to_dict()}), 201
 
 
 @bp.route('/<id>', methods=['GET'])
@@ -91,24 +71,3 @@ def get_grade(id):
     if not grade:
         return jsonify({"status": "error", "message": "grade not found"}), 404
     return jsonify({"status": "ok", "data": grade.to_dict()})
-
-
-@bp.route('/<id>', methods=['PUT'])
-def update_grade(id):
-    grade = Grade.find_by_id(id)
-    if not grade:
-        return jsonify({"status": "error", "message": "grade not found"}), 404
-    data = request.get_json()
-    grade.data.update(data)
-    grade.save()
-    return jsonify({"status": "ok", "data": grade.to_dict()})
-
-
-@bp.route('/<id>', methods=['DELETE'])
-def delete_grade(id):
-    grade = Grade.find_by_id(id)
-    if not grade:
-        return jsonify({"status": "error", "message": "grade not found"}), 404
-    from config import db
-    db[Grade.collection].delete_one({"_id": grade.data["_id"]})
-    return jsonify({"status": "ok", "data": None})

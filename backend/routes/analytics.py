@@ -2,13 +2,26 @@ from flask import Blueprint, jsonify
 from models.subject import Subject
 from models.grade import Grade
 from models.attendance import Attendance
-import numpy as np
 
 
 bp = Blueprint('analytics', __name__)
 
 
-# Get all analysis metrics. Create summaries of features like subject, grades, and attendance.
+LETTER_TO_GPA = {
+    'AA': 4.0, 'BA': 3.5, 'BB': 3.0, 'CB': 2.5,
+    'CC': 2.0, 'DC': 1.5, 'DD': 1.0, 'FF': 0.0,
+    'DZ': 0.0, 'G': 4.0
+}
+
+
+def parse_hours(value):
+    try:
+        return float(value.split()[0])
+    except (ValueError, AttributeError, IndexError):
+        return 0.0
+
+
+# Summary card data for the dashboard: subject count, GPA, overall attendance rate.
 @bp.route('/summary', methods=['GET'])
 def get_summary():
     subjects = Subject.find_all()
@@ -16,71 +29,70 @@ def get_summary():
     attendance = Attendance.find_all()
 
     total_subjects = len(subjects)
-    total_grades = len(grades)
-    total_attendance = len(attendance)
-    present_count = sum(1 for r in attendance if r.data.get('status') == 'present')
-    overall_attendance_rate = round((present_count / total_attendance) * 100, 2) if total_attendance > 0 else 0
+
+    # GPA from letter grades + credits
+    graded = [g for g in grades if g.data.get('letter_grade') in LETTER_TO_GPA]
+    total_points = sum(LETTER_TO_GPA[g.data['letter_grade']] * (float(g.data.get('credits', 0) or 0)) for g in graded)
+    total_credits = sum(float(g.data.get('credits', 0) or 0) for g in graded)
+    gpa = round(total_points / total_credits, 2) if total_credits > 0 else 0.0
+
+    # Attendance rate: average across all courses
+    rates = []
+    for r in attendance:
+        absence = parse_hours(r.data.get('theoretical_absence', '0'))
+        max_hours = parse_hours(r.data.get('theoretical_max', '0'))
+        if max_hours > 0:
+            rates.append((1 - absence / max_hours) * 100)
+    overall_attendance_rate = round(sum(rates) / len(rates), 2) if rates else 0.0
 
     return jsonify({"status": "ok", "data": {
         "total_subjects": total_subjects,
-        "total_grades": total_grades,
+        "gpa": gpa,
         "overall_attendance_rate": overall_attendance_rate
     }})
 
 
-# Get analytics for grades. Calculate average, highest, lowest, and distribution of grades across all subjects.
-@bp.route('/grades', methods=['GET'])
-def get_grade_analytics():
-    grades = Grade.find_all()
-    if not grades:
-        return jsonify({"status": "ok", "data": {}})
-
-    scores = np.array([g.data['score'] for g in grades])
-    weights = np.array([g.data['weight'] for g in grades])
-
-    return jsonify({"status": "ok", "data": {
-        "average": round(float(np.average(scores, weights=weights)), 2),
-        "highest": float(np.max(scores)),
-        "lowest": float(np.min(scores)),
-        "distribution": {
-            "90-100": int(np.sum(scores >= 90)),
-            "80-89": int(np.sum((scores >= 80) & (scores < 90))),
-            "70-79": int(np.sum((scores >= 70) & (scores < 80))),
-            "60-69": int(np.sum((scores >= 60) & (scores < 70))),
-            "below 60": int(np.sum(scores < 60))
-        }
-    }})
-
-
-# Get analytics for subjects. Calculate average grade and attendance rate for each subject.
+# Per-subject breakdown: letter grade and attendance rate for each course.
 @bp.route('/subjects', methods=['GET'])
 def get_subject_analytics():
     subjects = Subject.find_all()
     grades = Grade.find_all()
     attendance = Attendance.find_all()
 
+    # Build lookup dicts by course code
+    grades_by_code = {}
+    for g in grades:
+        code = g.data.get('code')
+        if code:
+            grades_by_code.setdefault(code, []).append(g)
+
+    attendance_by_code = {r.data.get('code'): r for r in attendance}
+
     result = []
+    seen_codes = set()
+
     for subject in subjects:
-        sid = str(subject.data['_id'])
+        code = subject.data.get('code')
+        if not code or code in seen_codes:
+            continue
+        seen_codes.add(code)
 
-        subject_grades = [g for g in grades if g.data.get('subject_id') == sid]
-        subject_attendance = [r for r in attendance if r.data.get('subject_id') == sid]
+        subject_grades = grades_by_code.get(code, [])
+        latest_grade = next((g for g in subject_grades if g.data.get('letter_grade')), None)
+        letter_grade = latest_grade.data.get('letter_grade') if latest_grade else None
 
-        avg_score = None
-        if subject_grades:
-            scores = np.array([g.data['score'] for g in subject_grades])
-            weights = np.array([g.data['weight'] for g in subject_grades])
-            avg_score = round(float(np.average(scores, weights=weights)), 2)
-
+        attendance_record = attendance_by_code.get(code)
         attendance_rate = None
-        if subject_attendance:
-            total = len(subject_attendance)
-            present = sum(1 for r in subject_attendance if r.data.get('status') == 'present')
-            attendance_rate = round((present / total) * 100, 2)
+        if attendance_record:
+            absence = parse_hours(attendance_record.data.get('theoretical_absence', '0'))
+            max_hours = parse_hours(attendance_record.data.get('theoretical_max', '0'))
+            if max_hours > 0:
+                attendance_rate = round((1 - absence / max_hours) * 100, 2)
 
         result.append({
-            "subject": subject.to_dict(),
-            "average_score": avg_score,
+            "code": code,
+            "name": subject.data.get('name'),
+            "letter_grade": letter_grade,
             "attendance_rate": attendance_rate
         })
 
