@@ -25,21 +25,33 @@ PAGES = {
 
 class OBISScraper:
 
-# Attaches to an existing Chrome session via CDP. User must login to OBIS manually.
+    # Attaches to an existing Chrome session via CDP. User must login to OBIS manually.
+    # Opens a NEW tab for scraping so the user's existing tabs are not disturbed.
     def scrape_all(self):
+        errors = {}
         with sync_playwright() as p:
             browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
             context = browser.contexts[0]
-            page = context.pages[0]
-            self._get_schedule(page)
-            self._get_grades(page)
-            self._get_attendance(page)
-            self._get_exams(page)
-            self._get_announcements(page)
+            page = context.new_page()
+            try:
+              for name, fn in [
+                ('schedule',      self._get_schedule),
+                ('grades',        self._get_grades),
+                ('attendance',    self._get_attendance),
+                ('exams',         self._get_exams),
+                ('announcements', self._get_announcements),
+            ]:
+                try:
+                    fn(page)
+                except Exception as e:
+                    errors[name] = str(e)
+            finally:
+                page.close()
+        return errors  # empty dict means full success
 
     def _navigate(self, page, route):
-        page.goto(BASE_URL + route)
-        page.wait_for_load_state('networkidle')
+        page.goto(BASE_URL + route, timeout=60000)
+        page.wait_for_load_state('networkidle', timeout=60000)
         return BeautifulSoup(page.content(), 'html.parser')
 
     def _parse_table(self, soup, table_id):
@@ -83,8 +95,8 @@ class OBISScraper:
 # Same course repeats across consecutive time rows — we collect all slots and
 # compute time_start/time_end so we get one clean document per course+day.
     def _get_schedule(self, page):
-        page.goto(BASE_URL + PAGES['schedule'])
-        page.wait_for_load_state('networkidle')
+        page.goto(BASE_URL + PAGES['schedule'], timeout=60000)
+        page.wait_for_load_state('networkidle', timeout=60000)
         soup = BeautifulSoup(page.content(), 'html.parser')
         table = soup.find('table', {'id': TABLE_IDS['schedule']})
         if not table:
