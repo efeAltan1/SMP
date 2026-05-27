@@ -1,12 +1,13 @@
 from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from config import db
+import re
 
 
 BASE_URL = "https://obis.gelisim.edu.tr"
 
 TABLE_IDS = {
-    "courses": "dtNot_Dokum",
+    "schedule": "tbl",
     "grades": "dtList_Sinif_grdTanim_0",
     "attendance": "dtList_Sinif",
     "exams": "grdTanim",
@@ -14,7 +15,7 @@ TABLE_IDS = {
 }
 
 PAGES = {
-    "courses": "/Alacagim_Dersler.aspx",
+    "schedule": "/Ders_Program.aspx",
     "grades": "/Ders_Notlari.aspx",
     "attendance": "/Devamsizlik.aspx",
     "exams": "/Sinav_Tarihlerim.aspx",
@@ -24,26 +25,23 @@ PAGES = {
 
 class OBISScraper:
 
-# Attaches to an existing Chrome session via CDP. User must launch Chrome with
-# --remote-debugging-port=9222 and log in to OBIS manually before calling sync.
+# Attaches to an existing Chrome session via CDP. User must login to OBIS manually.
     def scrape_all(self):
         with sync_playwright() as p:
-            browser = p.chromium.connect_over_cdp("http://localhost:9222")
+            browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
             context = browser.contexts[0]
             page = context.pages[0]
-            self._get_courses(page)
+            self._get_schedule(page)
             self._get_grades(page)
             self._get_attendance(page)
             self._get_exams(page)
             self._get_announcements(page)
 
-    # navigates to the given OBIS page and returns a BeautifulSoup object
     def _navigate(self, page, route):
         page.goto(BASE_URL + route)
         page.wait_for_load_state('networkidle')
         return BeautifulSoup(page.content(), 'html.parser')
 
-    # finds the table by id, extracts headers and rows, returns list of dicts
     def _parse_table(self, soup, table_id):
         table = soup.find('table', {'id': table_id})
         if not table:
@@ -57,29 +55,179 @@ class OBISScraper:
                 result.append(dict(zip(headers, [c.get_text(strip=True) for c in cells])))
         return result
 
-# Temporarily using insert_one to inspect raw column names in Atlas.
-# Will switch to replace_one (upsert) once real field names are confirmed.
-    def _get_courses(self, page):
-        rows = self._parse_table(self._navigate(page, PAGES['courses']), TABLE_IDS['courses'])
-        for row in rows:
-            db['subjects'].insert_one(row)
+# A spaghetti solution for tables with nested headers. Scans rows to find the one header that contains 'DERS KODU'. Assumes that's the real header row, uses that header to parse the rest.
+    def _find_header_row(self, rows):
+        for i, row in enumerate(rows):
+            cells = row.find_all(['th', 'td'])
+            if any('DERS KODU' in c.get_text(strip=True) for c in cells):
+                return i
+        return 0
+    
+# Used for tables where row 0 is the semester header. 
+    def _parse_table_nested(self, soup, table_id):
+        table = soup.find('table', {'id': table_id})
+        if not table:
+            return []
+        rows = table.find_all('tr')
+        header_index = self._find_header_row(rows)
+        headers = [th.get_text(strip=True) for th in rows[header_index].find_all(['th', 'td'])]
+        result = []
+        for row in rows[header_index + 1:]:
+            cells = row.find_all('td')
+            if cells:
+                result.append(dict(zip(headers, [c.get_text(strip=True) for c in cells])))
+        return result
+
+# Scrapes the weekly schedule from Ders_Program.aspx.
+# Each cell contains course code, name, building, room and teacher across day columns.
+# Same course repeats across consecutive time rows — we collect all slots and
+# compute time_start/time_end so we get one clean document per course+day.
+    def _get_schedule(self, page):
+        page.goto(BASE_URL + PAGES['schedule'])
+        page.wait_for_load_state('networkidle')
+        soup = BeautifulSoup(page.content(), 'html.parser')
+        table = soup.find('table', {'id': TABLE_IDS['schedule']})
+        if not table:
+            return
+        rows = table.find_all('tr')
+        if not rows:
+            return
+
+        # Row 0 is the header: SAAT, PAZARTESİ, SALI, ÇARŞAMBA, PERŞEMBE, CUMA, CUMARTESİ, PAZAR
+        headers = [td.get_text(strip=True) for td in rows[0].find_all('td')]
+        days = headers[1:]
+
+        # Collect entries keyed by (code, day) to merge consecutive time slots
+        schedule = {}
+
+        for row in rows[1:]:
+            cells = row.find_all('td')
+            if not cells:
+                continue
+
+            time_slot = cells[0].get_text(strip=True)
+            if '-' not in time_slot:
+                continue
+
+            time_start = time_slot.split('-')[0].strip()
+            time_end = time_slot.split('-')[1].strip()
+
+            for i, cell in enumerate(cells[1:]):
+                text = cell.get_text(separator='\n', strip=True)
+                if not text:
+                    continue
+
+                lines = [l.strip() for l in text.split('\n') if l.strip()]
+                if len(lines) < 4 or '-' not in lines[0]:
+                    continue
+
+                code = lines[0].split('-')[0].strip()
+                name = lines[0].split('-', 1)[1].strip()
+                building = lines[1].strip('()')
+                room_match = re.search(r'\(([^)]+)\)', lines[2])
+                room = room_match.group(1) if room_match else lines[2]
+                teacher = lines[3]
+                day = days[i] if i < len(days) else ''
+
+                key = (code, day)
+                if key not in schedule:
+                    schedule[key] = {
+                        "code": code,
+                        "name": name,
+                        "day": day,
+                        "time_start": time_start,
+                        "time_end": time_end,
+                        "building": building,
+                        "room": room,
+                        "teacher": teacher
+                    }
+                else:
+                    # Extend time_end as we hit later slots for the same course
+                    schedule[key]['time_end'] = time_end
+
+        for entry in schedule.values():
+            db['subjects'].replace_one(
+                {"code": entry['code'], "day": entry['day']},
+                entry,
+                upsert=True
+            )
 
     def _get_grades(self, page):
         rows = self._parse_table(self._navigate(page, PAGES['grades']), TABLE_IDS['grades'])
         for row in rows:
-            db['grades'].insert_one(row)
+            db['grades'].replace_one(
+                {"code": row.get('DERS KODU', '')},
+                {
+                    "code": row.get('DERS KODU', ''),
+                    "subject": row.get('DERS ADI', ''),
+                    "credits": row.get('KREDİ', ''),
+                    "ects": row.get('AKTS', ''),
+                    "teacher": row.get('DERSİ VEREN Ö.ELEMANI', ''),
+                    "homework": row.get('ÖDEV', ''),
+                    "quiz": row.get('KISA SINAV', ''),
+                    "midterm": row.get('VİZE', ''),
+                    "midterm_makeup": row.get('VİZE MAZERET', ''),
+                    "final": row.get('FİNAL', ''),
+                    "resit": row.get('BÜTÜNLEME', ''),
+                    "letter_grade": row.get('HARF NOTU', '')
+                },
+                upsert=True
+            )
 
+# Need to hardcode column positions due to misalignments. Confirmed the column positions from manual inspection of the OBIS attendance table.
     def _get_attendance(self, page):
-        rows = self._parse_table(self._navigate(page, PAGES['attendance']), TABLE_IDS['attendance'])
-        for row in rows:
-            db['attendance'].insert_one(row)
+        soup = self._navigate(page, PAGES['attendance'])
+        table = soup.find('table', {'id': TABLE_IDS['attendance']})
+        if not table:
+            return
+
+        rows = table.find_all('tr')
+        header_index = self._find_header_row(rows)
+    
+        columns = ['code', 'subject', 'theoretical_absence', 'practical_absence',
+                    'theoretical_max', 'practical_max', 'letter_grade']
+
+        for row in rows[header_index + 1:]:
+            cells = row.find_all('td')
+            if len(cells) >= len(columns):
+                data = {col: cells[i].get_text(strip=True) for i, col in enumerate(columns)}
+                # Only keep rows where code looks like a real course code (e.g. ISL220, ATA202)
+                # and at least one absence field is populated.
+                code_is_valid = bool(re.match(r'^[A-ZÇĞİÖŞÜ]+\d+$', data['code'])) and len(data['code']) <= 7
+                has_absence_data = data['theoretical_absence'] != '' or data['practical_absence'] != ''
+                if code_is_valid and has_absence_data:
+                    db['attendance'].replace_one(
+                        {"code": data['code']},
+                        data,
+                        upsert=True
+                    )
 
     def _get_exams(self, page):
         rows = self._parse_table(self._navigate(page, PAGES['exams']), TABLE_IDS['exams'])
         for row in rows:
-            db['exams'].insert_one(row)
+            db['exams'].replace_one(
+                {"code": row.get('DERS KODU', ''), "type": row.get('SINAV TÜRÜ', '')},
+                {
+                    "code": row.get('DERS KODU', ''),
+                    "subject": row.get('DERS ADI', ''),
+                    "type": row.get('SINAV TÜRÜ', ''),
+                    "date": row.get('SINAV TARİHİ', ''),
+                    "hour": row.get('SAATİ', ''),
+                    "location": row.get('SINAV YERİ', '')
+                },
+                upsert=True
+            )
 
+# Getting the most recent 25 announcements. Older announcements are not relevant.
     def _get_announcements(self, page):
-        rows = self._parse_table(self._navigate(page, PAGES['announcements']), TABLE_IDS['announcements'])
+        soup = self._navigate(page, PAGES['announcements'])
+        rows = self._parse_table(soup, TABLE_IDS['announcements'])[:25]
+
+        db['announcements'].delete_many({})
         for row in rows:
-            db['announcements'].insert_one(row)
+            db['announcements'].insert_one({
+                "title": row.get('BAŞLIK', ''),
+                "content": row.get('MESAJ', ''),
+                "date": row.get('GÖNDERİM TARİHİ', '')
+            })
+                
