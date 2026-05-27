@@ -10,9 +10,6 @@ from routes.analytics import bp as analytics_bp
 from routes.sync import bp as sync_bp
 
 
-
-
-
 # creates and configures the Flask app
 def create_app():
     app = Flask(__name__)
@@ -22,12 +19,13 @@ def create_app():
     app.register_blueprint(subjects_bp, url_prefix='/api/subjects')
     app.register_blueprint(grades_bp, url_prefix='/api/grades')
     app.register_blueprint(exams_bp, url_prefix='/api/exams')
-    app.register_blueprint(attendance_bp, url_prefix='/api/attendance') 
+    app.register_blueprint(attendance_bp, url_prefix='/api/attendance')
     app.register_blueprint(announcements_bp, url_prefix='/api/announcements')
     app.register_blueprint(analytics_bp, url_prefix='/api/analytics')
     app.register_blueprint(sync_bp, url_prefix='/api/sync')
-     
+
     return app
+
 
 # run app on debug mode
 if __name__ == "__main__":

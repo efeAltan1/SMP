@@ -24,8 +24,9 @@ PAGES = {
 
 class OBISScraper:
 
+# Attaches to an existing Chrome session via CDP. User must launch Chrome with
+# --remote-debugging-port=9222 and log in to OBIS manually before calling sync.
     def scrape_all(self):
-        # connects to an already-running Chrome session the user logged into manually
         with sync_playwright() as p:
             browser = p.chromium.connect_over_cdp("http://localhost:9222")
             context = browser.contexts[0]
@@ -36,14 +37,14 @@ class OBISScraper:
             self._get_exams(page)
             self._get_announcements(page)
 
+    # navigates to the given OBIS page and returns a BeautifulSoup object
     def _navigate(self, page, route):
-        # navigates to the given OBIS page and returns a BeautifulSoup object
         page.goto(BASE_URL + route)
         page.wait_for_load_state('networkidle')
         return BeautifulSoup(page.content(), 'html.parser')
 
+    # finds the table by id, extracts headers and rows, returns list of dicts
     def _parse_table(self, soup, table_id):
-        # finds the table by id, extracts headers and rows, returns list of dicts
         table = soup.find('table', {'id': table_id})
         if not table:
             return []
@@ -56,32 +57,29 @@ class OBISScraper:
                 result.append(dict(zip(headers, [c.get_text(strip=True) for c in cells])))
         return result
 
+# Temporarily using insert_one to inspect raw column names in Atlas.
+# Will switch to replace_one (upsert) once real field names are confirmed.
     def _get_courses(self, page):
-        soup = self._navigate(page, PAGES['courses'])
-        rows = self._parse_table(soup, TABLE_IDS['courses'])
+        rows = self._parse_table(self._navigate(page, PAGES['courses']), TABLE_IDS['courses'])
         for row in rows:
             db['subjects'].insert_one(row)
 
     def _get_grades(self, page):
-        soup = self._navigate(page, PAGES['grades'])
-        rows = self._parse_table(soup, TABLE_IDS['grades'])
+        rows = self._parse_table(self._navigate(page, PAGES['grades']), TABLE_IDS['grades'])
         for row in rows:
             db['grades'].insert_one(row)
 
     def _get_attendance(self, page):
-        soup = self._navigate(page, PAGES['attendance'])
-        rows = self._parse_table(soup, TABLE_IDS['attendance'])
+        rows = self._parse_table(self._navigate(page, PAGES['attendance']), TABLE_IDS['attendance'])
         for row in rows:
             db['attendance'].insert_one(row)
 
     def _get_exams(self, page):
-        soup = self._navigate(page, PAGES['exams'])
-        rows = self._parse_table(soup, TABLE_IDS['exams'])
+        rows = self._parse_table(self._navigate(page, PAGES['exams']), TABLE_IDS['exams'])
         for row in rows:
             db['exams'].insert_one(row)
 
     def _get_announcements(self, page):
-        soup = self._navigate(page, PAGES['announcements'])
-        rows = self._parse_table(soup, TABLE_IDS['announcements'])
+        rows = self._parse_table(self._navigate(page, PAGES['announcements']), TABLE_IDS['announcements'])
         for row in rows:
             db['announcements'].insert_one(row)

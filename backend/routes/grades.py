@@ -7,7 +7,7 @@ import io
 
 bp = Blueprint('grades', __name__)
 
-
+# Accessing the GPA of the student. GPA calculation is based on scores, and the weights. The weighted average is calculated and then converted to a GPA scale.
 @bp.route('/gpa', methods=['GET'])
 def get_gpa():
     grades = Grade.find_all()
@@ -20,7 +20,7 @@ def get_gpa():
     weighted_avg = np.average(scores, weights=weights)
 
 
-# GPA scale based on weighted average grades of the student. Threshold are adjusted to reflect the commonly used grading system.
+# GPA scale based on weighted average grades of the student. Thresholds are adjusted to reflect the commonly used grading system.
     if weighted_avg >= 97:
         gpa = 4.0
     elif weighted_avg >= 93:
@@ -51,6 +51,8 @@ def get_gpa():
     return jsonify({"status": "ok", "data": {"gpa": gpa, "average": round(float(weighted_avg), 2)}})
 
 
+
+# Export all grades as a CSV file. CSV columns are id, subject_id, title, score, weight. The file "grades.csv" is downloaded when the route is accessed.
 @bp.route('/export', methods=['GET'])
 def export_grades():
     grades = Grade.find_all()
@@ -68,7 +70,7 @@ def export_grades():
     response.headers['Content-Type'] = 'text/csv'
     return response
 
-
+# CRUD routes for grades. 
 @bp.route('/', methods=['GET'])
 def get_grades():
     grades = Grade.find_all()

@@ -4,7 +4,7 @@ class Subject(BaseModel):
     collection = "subjects"
 
 
-# Checks to see whether name and credits exist in self.data
+# Validating all required subject fields before saving to MongoDB. Raises ValueError if any are missing.
 def validate(self):
     if 'name' not in self.data:
         raise ValueError('Name required.')

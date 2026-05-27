@@ -85,3 +85,9 @@ Without this, any route that returns a document will throw a serialization error
 ## 11 - Why scraping?
 
 Student portal has no API. It's ASP.NET WebForms — every page uses server-side tokens (`__VIEWSTATE`, `__EVENTVALIDATION`) tied to a live session. A plain HTTP request won't work. Playwright runs a real headless browser that handles all of that automatically. BeautifulSoup parses the page once it loads.
+
+## 12 - How Do I handle OBIS credentials?
+
+OBIS credentials (OBIS_USERNAME, OBIS_PASSWORD) live in backend/.env. They never touch the frontend. The user doesn't enter their credentials manually, they're set in the environment once and stay there.
+
+When the user hits Sync, the frontend sends a plain [POST /api/sync] with no body. The backend reads the credentials from environment variables and passes them directly to the Playwright scraper. They never travel over the network, never get stored in MongoDB, and never appear in any API response.

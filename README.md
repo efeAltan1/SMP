@@ -9,17 +9,24 @@ A full-stack web app that syncs with OBIS (obis.gelisim.edu.tr) and gives you a 
 It currently tracks:
 
 - Courses and credits
+
 - Grades
+
 - Attendance
+
 - Exams
+
 - Announcements
 
 ## 2 - What does it cover that OBIS doesn't?
 
-- **Unified dashboard** - everything in one view. OBIS has a separate page for every single information, which makes it hard to navigate through.
-- **Attendance rate per course** - OBIS shows absences as a count. SMP converts it to a percentage and flags courses where you're close to the limit
-- **Upcoming exams and deadlines** - filtered and sorted views so you actually see what's next, not just a full calendar dump
-- **Analytics** - grade distribution, attendance trends, per-subject breakdowns. None of this exists in the portal.
+- **Unified dashboard** — everything in one view. OBIS has a separate page for every single information, which makes it hard to navigate through.
+
+- **Attendance rate per course** — OBIS shows absences as a count. SMP converts it to a percentage and flags courses where you're close to the limit
+
+- **Upcoming exams and deadlines** — filtered and sorted views so you actually see what's next, not just a full calendar dump
+
+- **Analytics** — grade distribution, attendance trends, per-subject breakdowns. None of this exists in the portal.
 
 ## 3 - Stack
 
