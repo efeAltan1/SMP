@@ -152,27 +152,62 @@ class OBISScraper:
                 upsert=True
             )
 
+    # Parses a BeautifulSoup table element directly into a list of dicts.
+    # Used by _get_grades which finds tables dynamically rather than by a fixed ID.
+    def _parse_table_element(self, table):
+        rows = table.find_all('tr')
+        if not rows:
+            return []
+        headers = [th.get_text(strip=True) for th in rows[0].find_all(['th', 'td'])]
+        result = []
+        for row in rows[1:]:
+            cells = row.find_all('td')
+            if cells:
+                result.append(dict(zip(headers, [c.get_text(strip=True) for c in cells])))
+        return result
+
+    # Iterates through all semester grade tables on Ders_Notlari.aspx.
+    # Table IDs follow the pattern dtList_Sinif_grdTanim_0, _1, _2 etc.
+    # Semester labels follow dtList_Sinif_lblBASLIK_0, _1, _2 etc.
+    # Stops when neither a table nor a label is found at index i.
     def _get_grades(self, page):
-        rows = self._parse_table(self._navigate(page, PAGES['grades']), TABLE_IDS['grades'])
-        for row in rows:
-            db['grades'].replace_one(
-                {"code": row.get('DERS KODU', '')},
-                {
-                    "code": row.get('DERS KODU', ''),
-                    "subject": row.get('DERS ADI', ''),
-                    "credits": row.get('KREDİ', ''),
-                    "ects": row.get('AKTS', ''),
-                    "teacher": row.get('DERSİ VEREN Ö.ELEMANI', ''),
-                    "homework": row.get('ÖDEV', ''),
-                    "quiz": row.get('KISA SINAV', ''),
-                    "midterm": row.get('VİZE', ''),
-                    "midterm_makeup": row.get('VİZE MAZERET', ''),
-                    "final": row.get('FİNAL', ''),
-                    "resit": row.get('BÜTÜNLEME', ''),
-                    "letter_grade": row.get('HARF NOTU', '')
-                },
-                upsert=True
-            )
+        soup = self._navigate(page, PAGES['grades'])
+        i = 0
+        while True:
+            table_id = f'dtList_Sinif_grdTanim_{i}'
+            label_id = f'dtList_Sinif_lblBASLIK_{i}'
+
+            table = soup.find('table', {'id': table_id})
+            label = soup.find(id=label_id)
+
+            if not table and not label:
+                break
+
+            semester = label.get_text(strip=True) if label else f'semester_{i}'
+
+            if table:
+                for row in self._parse_table_element(table):
+                    if row.get('DERS KODU'):
+                        db['grades'].replace_one(
+                            {"code": row.get('DERS KODU', ''), "semester": semester},
+                            {
+                                "code": row.get('DERS KODU', ''),
+                                "subject": row.get('DERS ADI', ''),
+                                "semester": semester,
+                                "credits": row.get('KREDİ', ''),
+                                "ects": row.get('AKTS', ''),
+                                "teacher": row.get('DERSİ VEREN Ö.ELEMANI', ''),
+                                "homework": row.get('ÖDEV', ''),
+                                "quiz": row.get('KISA SINAV', ''),
+                                "midterm": row.get('VİZE', ''),
+                                "midterm_makeup": row.get('VİZE MAZERET', ''),
+                                "final": row.get('FİNAL', ''),
+                                "resit": row.get('BÜTÜNLEME', ''),
+                                "letter_grade": row.get('HARF NOTU', '')
+                            },
+                            upsert=True
+                        )
+            i += 1
 
 # Need to hardcode column positions due to misalignments. Confirmed the column positions from manual inspection of the OBIS attendance table.
     def _get_attendance(self, page):
