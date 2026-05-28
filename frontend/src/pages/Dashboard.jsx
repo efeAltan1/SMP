@@ -92,12 +92,12 @@ export default function Dashboard() {
     .sort((a, b) => (a.time_start || '').localeCompare(b.time_start || ''))
 
   const load = async () => {
-    try { const r = await getAnalyticsSummary(); setSummary(r.data.data) } catch {}
-    try { const r = await getUpcomingExams();    setUpcomingExams(r.data.data) } catch {}
-    try { const r = await getExams();            setAllExams(r.data.data) } catch {}
-    try { const r = await getAnnouncements();    setAnnouncements(r.data.data) } catch {}
-    try { const r = await getSubjects();         setSubjects(r.data.data) } catch {}
-    try { const r = await getGrades();           setGrades(r.data.data) } catch {}
+    try { const r = await getAnalyticsSummary(); setSummary(r.data.data ?? null) } catch {}
+    try { const r = await getUpcomingExams();    setUpcomingExams(r.data.data ?? []) } catch {}
+    try { const r = await getExams();            setAllExams(r.data.data ?? []) } catch {}
+    try { const r = await getAnnouncements();    setAnnouncements(r.data.data ?? []) } catch {}
+    try { const r = await getSubjects();         setSubjects(r.data.data ?? []) } catch {}
+    try { const r = await getGrades();           setGrades(r.data.data ?? []) } catch {}
   }
 
   useEffect(() => { load() }, [])
