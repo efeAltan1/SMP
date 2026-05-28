@@ -87,3 +87,23 @@
     @apply font-sans;
   }
 }
+
+/* Force SMP dark theme — overrides shadcn defaults */
+:root {
+  --smp-bg:         #1c1f2e;
+  --smp-surface:    #252837;
+  --smp-surface2:   #2d3045;
+  --smp-border:     #383c54;
+  --smp-accent:     #6366f1;
+  --smp-accent-dim: #3d3f6e;
+  --smp-text:       #e8eaf6;
+  --smp-muted:      #7b80a0;
+  --smp-green:      #34d399;
+  --smp-yellow:     #fbbf24;
+  --smp-red:        #f87171;
+}
+
+html, body, #root {
+  background-color: var(--smp-bg) !important;
+  color: var(--smp-text) !important;
+}
