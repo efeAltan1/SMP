@@ -1,4 +1,3 @@
-from playwright.sync_api import sync_playwright
 from bs4 import BeautifulSoup
 from config import db
 import re
@@ -28,6 +27,7 @@ class OBISScraper:
     # Attaches to an existing Chrome session via CDP. User must login to OBIS manually.
     # Opens a NEW tab for scraping so the user's existing tabs are not disturbed.
     def scrape_all(self):
+        from playwright.sync_api import sync_playwright  # lazy import — Render has no Chrome
         errors = {}
         with sync_playwright() as p:
             browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
