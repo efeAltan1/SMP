@@ -91,3 +91,29 @@ Student portal has no API. It's ASP.NET WebForms — every page uses server-side
 OBIS credentials (OBIS_USERNAME, OBIS_PASSWORD) live in backend/.env. They never touch the frontend. The user doesn't enter their credentials manually, they're set in the environment once and stay there.
 
 When the user hits Sync, the frontend sends a plain [POST /api/sync] with no body. The backend reads the credentials from environment variables and passes them directly to the Playwright scraper. They never travel over the network, never get stored in MongoDB, and never appear in any API response.
+
+## 13 - Learnings & Fixes
+
+While building SMP, several unnaccounted for problems came up that needed out of box thinking to fix. This section logs what's broken, why it broke, and how it was fixed. 
+
+- **reCaptcha**: Auto-login was the original plan to get into the OBIS system. But I did not account for the Google reCaptcha that OBIS uses. The first solution was to try and use 'playwright_stealth' to mask the browser fingerprint. But it caused two problems; with stealth, the challenge didn't render client-side, and without stealth, Google served an image challenge that the bot could not solve. The solution was the CDP attachment, where the user logs into OBIS manually in a remote debugging Chrome window, and Playwright attaches itself to that existing session without touching the flow.
+
+- **Nested Header Tables**: I tried to standardize data collection by reading header columns and getting the table_id data underneath. But several OBIS tables have a semester label as the first row, which then push the real column header down 1 row. The solution was to creating '_find_header_row()', which scans rows until it finds one containing 'DERS KODU', then treats that as the real header.
+
+- **Attendance Field Column Misalignment**: The attendance table had merged header cells, which meant that the header row had fewer cells than the data rows. Using 'zip(headers, cells)' shifted every value into the wrong columns. The solution was to hardcode column positions based on manual inspection of the HTML code, and filtering rows with a rigid course code regex to discard junk rows.
+
+- **Subject Scraper Rework**: The original plan was to get the subject scraper to target 'Alacagim_Dersler.aspx', but it had the same nested header table problem. The solution was to change the scraper path to 'Ders_Program.aspx.', which returned cleaner and more granular data: course code, name, day, time slot, building, room, teacher.
+
+- **Announcements Upsert Collision**: All announcements share the same title (Duyuru/Announcement: OBİS) and have an empty date field. Upserting on those keys means every announcement overwrites the same slot, leaving only one record. The solution was to clear the collection with delete_many before each sync and use insert_one instead.
+
+- **Sync HTTP Timeout**: The scraper navigates five OBIS pages sequentially. This takes 15-25 seconds. The problem was that the browser dropped the HTTP connection before Flask sent a response, and the frontend received a network error even though the scrape completed successfully. The solution was to running the scraper in a background thread and returning a 202 immediately. This then made the frontend polls 'GET /api/sync/status' every ~3 seconds until the status changed to 'done', 'partial', or 'error'.
+
+## 14 - Scaling Beyond One User
+
+SMP, currently, is built as a single-user, highly personalized tool. My school credentials are hardcoded in '.env', there is no auth layer, and the sync runs in a single Flask thread tied to one person's browser session. This was an intentional approach, because I wanted to keep the scope and the architecture design simple. However, if I were to extend the project to support multiple users, three main layers would have to change:
+
+- **CDP Approach**: The entire reason CDP works is that a human solves the login manually, due to the Google reCaptcha system. At scale, you cannot have every user keep a Chrome tab open. Any multi-user architecture would need solve the login problem first, either through a CAPTCHA solving service (risky, and legally dubious) or supervised one-time login flow that stores the resulting session cookies (need to manage and work around cookie expiry cycles, timeout sessions).
+
+- **Auth Layer and Credential Storage**: As it stands currently, OBIS credentials live in '.env' file and belong to a single person. At scale, each user would have their own credentials stored encrypted in the database, never exposed to any API call and response.
+
+- **Scrape Queue**: With multiple users trying to sync at the same time, playwright won't be able to run in a single Flask thread. Each sing request would need to be queued and assigned to a dedicated worker process with its own playwright instance, so the users can sync at the same time. The approach I would take for this would be the standard Celery with a Redis broker. 
